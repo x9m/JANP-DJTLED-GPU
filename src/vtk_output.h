@@ -3,7 +3,7 @@
 //   Stopwatch    wall-clock timer that can be paused, so the simulation time can leave out the VTK export.
 //   parseFrames  reads the optional second command-line argument: the number of animation frames (default 100).
 //   FrameSchedule decides after which time steps a frame is written: the initial state, every `interval` steps, and the last step.
-//   outputPrefix builds the "<algorithm>_<model>" prefix that every output file name starts with (e.g. ANPDJTLED_DET_OMP_NH).
+//   outputPrefix builds the "<algorithm>_<model>" prefix that every output file name starts with (e.g. JANP-DJTLED_CPU_NH_049).
 //   VtkExport    writes legacy ASCII VTK files:
 //                  - an animation: <prefix>_timesteps/<prefix>_step_NNNNNN.vtk (NNNNNN = time steps completed) and the
 //                    ParaView index <prefix>_simulation.vtk.series, which opens as one animated dataset;
@@ -56,7 +56,7 @@ inline bool parseFrames(int argc, char** argv, size_t& frames)
 }
 
 // Prefix of every output file: "<algorithm>_<model>", where <model> is the model file name without its folder and
-// extension (models/NH.txt -> NH). The final files are <prefix>_u.vtk and <prefix>_undeformed.vtk.
+// extension (models/NH_049.txt -> NH_049). The final files are <prefix>_u.vtk and <prefix>_undeformed.vtk.
 inline std::string outputPrefix(const std::string& algorithm, const std::string& model_path)
 {
     const std::string model = std::filesystem::path(model_path).stem().string();

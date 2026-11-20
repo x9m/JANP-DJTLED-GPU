@@ -5,8 +5,8 @@ Run from anywhere; paths are relative to the repository root.
 
   python3 run.py --list                         show the solvers and models that can be selected
   python3 run.py                                every solver on every model, all three outputs
-  python3 run.py -a DJTLED -m NH --times        one solver, one model, computation time only
-  python3 run.py -a DJTLED ANPDJTLED_DET_OMP --final --animation --frames 50
+  python3 run.py -a JANP-DJTLED_CPU -m NH_049 --times             one solver, one model, computation time only
+  python3 run.py -a JANP-DJTLED_CPU -m NH_049 NH_0499 --final --animation --frames 50
   python3 run.py --times --repeat 5 --threads 4
 
 Selecting what to run
@@ -239,9 +239,17 @@ def main():
                     kept += keep(Path(tmp), out_dir, [f"{prefix}_u.vtk", f"{prefix}_undeformed.vtk"])
                 if args.animation:
                     kept += keep(Path(tmp), out_dir, [f"{prefix}_simulation.vtk.series", f"{prefix}_timesteps"])
+                expected = ([f"{prefix}_u.vtk", f"{prefix}_undeformed.vtk"] if args.final else []) + \
+                           ([f"{prefix}_simulation.vtk.series", f"{prefix}_timesteps/"] if args.animation else [])
+                missing = [e for e in expected if e not in kept]
             if times:
                 row["median_ms"], row["best_ms"] = statistics.median(times), min(times)
             took = f"{row['median_ms']:,.1f} ms" if times else "time not reported"
+            if missing:  # it ran, but under another name: the name in the solver's outputPrefix(...) must equal its file name
+                row["status"] = "no output"
+                print(f"  {model.stem}: ran ({took}) but did not write {', '.join(missing)}; "
+                      f"check that {solvers[name].name} names its output \"{name}\" in outputPrefix(...)")
+                continue
             print(f"  {model.stem}: ok, {took}" + (f"; saved {', '.join(kept)}" if kept else ""))
 
     if args.times:
@@ -255,7 +263,7 @@ def main():
                 writer.writerow([r["algorithm"], r["model"], r["status"], "" if r["steps"] is None else int(r["steps"]), r["runs"],
                                  args.threads or "default"] + ["" if r[k] is None else f"{r[k]:.3f}" for k in ("median_ms", "best_ms", "export_ms")])
         print(f"\n  saved {csv_path}")
-    return 1 if any(r["status"] in ("failed", "build failed") for r in rows) else 0
+    return 1 if any(r["status"] in ("failed", "build failed", "no output") for r in rows) else 0
 
 
 if __name__ == "__main__":
