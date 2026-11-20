@@ -7,8 +7,9 @@ The solvers implement DJTLED, the direct Jacobian total Lagrangian explicit dyna
 | Cube model | Brain model |
 |:---:|:---:|
 | ![Cube model being stretched, coloured by displacement magnitude](docs/cube_049.gif) | ![Brain model deforming under brain shift, coloured by displacement magnitude](docs/brain_049.gif) |
+|                                                                                      |                                                                                                    |
 
-Both animations are from the CPU solver at Poisson's ratio 0.49, coloured by displacement magnitude. The cube is `models/NH_049.txt`; the brain model is not included in this repository.
+
 
 DJTLED is described in:
 
