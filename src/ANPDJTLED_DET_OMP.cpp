@@ -1,4 +1,4 @@
-﻿/*
+/*
 MIT License
 
 Copyright (c) 2022 Jinao Zhang
@@ -28,15 +28,18 @@ SOFTWARE.
 // instead of via nodal pressures p_a = Kappa * (J - 1) averaged with nodal volumes (ANPDJTLED_OMP.cpp).
 // The two are equal in exact arithmetic for a single material (Kappa cancels, try.pdf Eqs. (2)-(9)), so the results match
 // ANPDJTLED_OMP to float rounding. Eq. (10), for models with more than one bulk modulus, is not needed: one material per model.
+// Build (from the repository root; create bin/ first):
+//   Linux, GCC:         g++ -std=c++17 -O3 -fopenmp src/ANPDJTLED_DET_OMP.cpp -o bin/ANPDJTLED_DET_OMP
+//   macOS, Apple clang: clang++ -std=c++17 -O3 -Xclang -fopenmp -I"$(brew --prefix libomp)/include" src/ANPDJTLED_DET_OMP.cpp -L"$(brew --prefix libomp)/lib" -lomp -o bin/ANPDJTLED_DET_OMP
 #include <iostream>
 #include <vector>
-#include <chrono>
-#include <fstream>
+#include <algorithm>
+#include <cmath>
+#include <cstring>
 #include <omp.h>
 #include <cstdio>
-#include <cstdint>
 #include <string>
-#include "../../common/vtk_output.h" // VTK export (animation and final shape) and the timers
+#include "vtk_output.h" // VTK export (animation and final shape) and the timers
 using namespace  std;
 static const int NUM_THREADS(omp_get_max_threads());
 
@@ -276,37 +279,38 @@ Model* readModel(int argc, char **argv)
         char buffer[256];
         unsigned int idx(0); float x(0.f), y(0.f), z(0.f);
         fscanf(file, "%u %f %f %f", &idx, &x, &y, &z); model->m_node_begin_index = idx; model->m_nodes.push_back(new Node(idx - model->m_node_begin_index, x, y, z)); // for first node only, to get node begin index
-        while (fscanf(file, "%u %f %f %f", &idx, &x, &y, &z)) { model->m_nodes.push_back(new Node(idx - model->m_node_begin_index, x, y, z)); } // internally, node index starts at 0
+        while (fscanf(file, "%u %f %f %f", &idx, &x, &y, &z) == 4) { model->m_nodes.push_back(new Node(idx - model->m_node_begin_index, x, y, z)); } // internally, node index starts at 0
         fscanf(file, "%255s", buffer); model->m_material_type = buffer;
         if (model->m_material_type == "NH") { float Mu(0.f), K(0.f); fscanf(file, "%f %f", &Mu, &K); model->m_material_vals.push_back(Mu); model->m_material_vals.push_back(K); }
         else if (model->m_material_type == "other_material_types") { /*add your code here*/ }
+        if (model->m_material_vals.size() < 2) { cerr << "\n\tError: unsupported material type: " << model->m_material_type << " (only NH is implemented)." << endl; fclose(file); delete model; return nullptr; }
         fscanf(file, "%255s %f", buffer, &model->m_rho);
         fscanf(file, "%255s", buffer); model->m_ele_type = buffer;
         unsigned int n1_idx(0), n2_idx(0), n3_idx(0), n4_idx(0);
         fscanf(file, "%u %u %u %u %u", &idx, &n1_idx, &n2_idx, &n3_idx, &n4_idx); model->m_ele_begin_index = idx; model->m_tets.push_back(new T4(idx - model->m_ele_begin_index,
                                                                                                                                                    *model->m_nodes[n1_idx - model->m_node_begin_index], *model->m_nodes[n2_idx - model->m_node_begin_index], *model->m_nodes[n3_idx - model->m_node_begin_index], *model->m_nodes[n4_idx - model->m_node_begin_index],
                                                                                                                                                     model->m_rho, model->m_material_type, model->m_material_vals)); // for first ele only, to get ele begin index
-        while (fscanf(file, "%u %u %u %u %u", &idx, &n1_idx, &n2_idx, &n3_idx, &n4_idx)) { model->m_tets.push_back(new T4(idx - model->m_ele_begin_index,
+        while (fscanf(file, "%u %u %u %u %u", &idx, &n1_idx, &n2_idx, &n3_idx, &n4_idx) == 5) { model->m_tets.push_back(new T4(idx - model->m_ele_begin_index,
                                                                                                                             *model->m_nodes[n1_idx - model->m_node_begin_index], *model->m_nodes[n2_idx - model->m_node_begin_index], *model->m_nodes[n3_idx - model->m_node_begin_index], *model->m_nodes[n4_idx - model->m_node_begin_index],
                                                                                                                              model->m_rho, model->m_material_type, model->m_material_vals)); } // internally, ele index starts at 0
-        while (fscanf(file, "%255s", buffer))
+        while (fscanf(file, "%255s", buffer) == 1)
         {
             string BC_type(buffer), xyz("");
             if (BC_type == "<Disp>") // Displacements
             {
                 float u(0.f); fscanf(file, "%255s %f", buffer, &u); xyz = buffer;
-                if      (xyz == "x") { while (fscanf(file, "%u", &idx)) { model->m_disp_idx_x.push_back(idx - model->m_node_begin_index); model->m_disp_mag_x.push_back(u); } }
-                else if (xyz == "y") { while (fscanf(file, "%u", &idx)) { model->m_disp_idx_y.push_back(idx - model->m_node_begin_index); model->m_disp_mag_y.push_back(u); } }
-                else if (xyz == "z") { while (fscanf(file, "%u", &idx)) { model->m_disp_idx_z.push_back(idx - model->m_node_begin_index); model->m_disp_mag_z.push_back(u); } }
+                if      (xyz == "x") { while (fscanf(file, "%u", &idx) == 1) { model->m_disp_idx_x.push_back(idx - model->m_node_begin_index); model->m_disp_mag_x.push_back(u); } }
+                else if (xyz == "y") { while (fscanf(file, "%u", &idx) == 1) { model->m_disp_idx_y.push_back(idx - model->m_node_begin_index); model->m_disp_mag_y.push_back(u); } }
+                else if (xyz == "z") { while (fscanf(file, "%u", &idx) == 1) { model->m_disp_idx_z.push_back(idx - model->m_node_begin_index); model->m_disp_mag_z.push_back(u); } }
                 model->m_num_BCs++;
             }
             else if (BC_type == "<FixP>") // Fixed positions
             {
                 fscanf(file, "%255s", buffer); xyz = buffer;
-                if      (xyz == "x")   { while (fscanf(file, "%u", &idx)) { model->m_fixP_idx_x.push_back(idx - model->m_node_begin_index); } }
-                else if (xyz == "y")   { while (fscanf(file, "%u", &idx)) { model->m_fixP_idx_y.push_back(idx - model->m_node_begin_index); } }
-                else if (xyz == "z")   { while (fscanf(file, "%u", &idx)) { model->m_fixP_idx_z.push_back(idx - model->m_node_begin_index); } }
-                else if (xyz == "all") { while (fscanf(file, "%u", &idx)) { model->m_fixP_idx_x.push_back(idx - model->m_node_begin_index); model->m_fixP_idx_y.push_back(idx - model->m_node_begin_index); model->m_fixP_idx_z.push_back(idx - model->m_node_begin_index); } }
+                if      (xyz == "x")   { while (fscanf(file, "%u", &idx) == 1) { model->m_fixP_idx_x.push_back(idx - model->m_node_begin_index); } }
+                else if (xyz == "y")   { while (fscanf(file, "%u", &idx) == 1) { model->m_fixP_idx_y.push_back(idx - model->m_node_begin_index); } }
+                else if (xyz == "z")   { while (fscanf(file, "%u", &idx) == 1) { model->m_fixP_idx_z.push_back(idx - model->m_node_begin_index); } }
+                else if (xyz == "all") { while (fscanf(file, "%u", &idx) == 1) { model->m_fixP_idx_x.push_back(idx - model->m_node_begin_index); model->m_fixP_idx_y.push_back(idx - model->m_node_begin_index); model->m_fixP_idx_z.push_back(idx - model->m_node_begin_index); } }
                 model->m_num_BCs++;
             }
             else if (BC_type == "<Gravity>") // Gravity
@@ -324,6 +328,7 @@ Model* readModel(int argc, char **argv)
         fscanf(file, "%255s %f", buffer, &model->m_dt);
         fscanf(file, "%255s %f", buffer, &model->m_total_t);
         fclose(file);
+        if (!(model->m_dt > 0.f) || !(model->m_total_t > 0.f)) { cerr << "\n\tError: TimeStep and TotalTime must be positive (is the model file incomplete?): " << argv[1] << endl; delete model; return nullptr; }
         model->m_num_steps = (size_t)ceil(model->m_total_t / model->m_dt);
         model->m_num_DOFs = model->m_nodes.size() * 3;
         model->postCreate();
@@ -335,7 +340,7 @@ void printInfo(const Model& model)
 {
     cout << endl;
     cout << "\t---------------------------------------------------------------------------------------------------" << endl;
-    cout << "\t| Oepn-source (OpenMP) implmentation of:                                                          |" << endl;
+    cout << "\t| Open-source (OpenMP) implementation of:                                                         |" << endl;
     cout << "\t|               <A direct Jacobian total Lagrangian explicit dynamics finite element algorithm... |" << endl;
     cout << "\t|                                             for real-time simulation of hyperelastic materials. |" << endl;
     cout << "\t|                                                                              Zhang, J. (2021).  |" << endl;
@@ -418,9 +423,11 @@ void computeRunTimeBC(const Model& model, ModelStates& modelstates, const size_t
 bool computeOneStep(const Model& model, ModelStates& modelstates)
 {
     bool no_err(true);
+    const int num_tets((int)model.m_tets.size()), num_nodes((int)model.m_nodes.size());
 #pragma omp parallel num_threads(NUM_THREADS)
     {
-        int id = omp_get_thread_num();
+        // each thread takes every num_threads-th item; the team OpenMP provides can be smaller than NUM_THREADS, so stride by its real size
+        const int id = omp_get_thread_num(), num_threads = omp_get_num_threads();
         float u[3][4], Jt[3][3], g[6], invJt[3][3], detJt(0.f), J(0.f), J23(0.f), I1(0.f), const1(0.f), f[3][4]; // X[4][3], Xb[3][3];
 
         // current Jacobian operator Jt of a tet from the current displacements, Eq. (11)
@@ -433,7 +440,7 @@ bool computeOneStep(const Model& model, ModelStates& modelstates)
         };
 
         // ANP pass 1: det(Jt) of each element (6 x its current volume, try.pdf Eq. (8))
-        for (int i = id; i < model.m_tets.size(); i += NUM_THREADS)
+        for (int i = id; i < num_tets; i += num_threads)
         {
             T4 *tet = model.m_tets[i];
             computeJt(tet);
@@ -444,7 +451,7 @@ bool computeOneStep(const Model& model, ModelStates& modelstates)
         // ANP pass 2: nodal volume ratio J_a = sum_e det(Jt(e)) / sum_e det(J0(e)) over the elements attached to node a,
         // the bracketed terms of try.pdf Eq. (9); no pressures or bulk modulus needed
         // (gathered per node via the node-to-element map, so there is no race condition)
-        for (int i = id; i < model.m_nodes.size(); i += NUM_THREADS)
+        for (int i = id; i < num_nodes; i += num_threads)
         {
             unsigned int tracking_num_eles(model.m_tracking_num_eles_i_eles_per_node_j[i * 2 + 0]),
                          eles_per_node    (model.m_tracking_num_eles_i_eles_per_node_j[i * 2 + 1]);
@@ -458,7 +465,7 @@ bool computeOneStep(const Model& model, ModelStates& modelstates)
 #pragma omp barrier
 
         // ANP pass 3: element forces with modified Jt
-        for (int i = id; i < model.m_tets.size(); i += NUM_THREADS) // loop through tets to compute for force contributions
+        for (int i = id; i < num_tets; i += num_threads) // loop through tets to compute for force contributions
         {
             T4 *tet = model.m_tets[i];
             computeJt(tet); // Eq. (11)
@@ -502,7 +509,7 @@ bool computeOneStep(const Model& model, ModelStates& modelstates)
             for (size_t m = 0; m < 4; m++) { for (size_t n = 0; n < 3; n++) { modelstates.m_ele_nodal_internal_F[tet->m_idx * 12 + m * 3 + n] = f[n][m]; } }
         }
 #pragma omp barrier
-        for (int i = id; i < model.m_nodes.size(); i += NUM_THREADS) // loop through nodes to compute for new displacements U
+        for (int i = id; i < num_nodes; i += num_threads) // loop through nodes to compute for new displacements U
         {
             // assemble nodal forces from individual ele nodal forces, due to avoiding race condition
             float nodal_internal_F[3] = { 0.f, 0.f, 0.f };
@@ -528,7 +535,11 @@ bool computeOneStep(const Model& model, ModelStates& modelstates)
                     modelstates.m_next_U[n_DOF] = modelstates.m_central_diff_const1[n_DOF] * (modelstates.m_external_F[n_DOF] - nodal_internal_F[j]) +
                                                   modelstates.m_central_diff_const2[n_DOF] * modelstates.m_curr_U[n_DOF] +
                                                   modelstates.m_central_diff_const3[n_DOF] * modelstates.m_prev_U[n_DOF];
-                    if (isnan(modelstates.m_next_U[n_DOF])) { no_err = false; }
+                    if (std::isnan(modelstates.m_next_U[n_DOF]))
+                    {
+#pragma omp atomic write
+                        no_err = false; // several threads may report divergence at once
+                    }
                 }
             }
         }
@@ -544,14 +555,15 @@ VtkExport makeVtkExport(const Model& model) // undeformed node coordinates and e
     for (const Node* node : model.m_nodes) { xyz[node->m_idx * 3 + 0] = node->m_x; xyz[node->m_idx * 3 + 1] = node->m_y; xyz[node->m_idx * 3 + 2] = node->m_z; }
     vector<unsigned int> tets(model.m_tets.size() * 4);
     for (const T4* tet : model.m_tets) { for (unsigned int m = 0; m < 4; m++) { tets[tet->m_idx * 4 + m] = tet->m_n_idx[m]; } }
-    return VtkExport("ANPDJTLED_DET_OMP", xyz, tets);
+    return VtkExport(outputPrefix("ANPDJTLED_DET_OMP", model.m_fname), xyz, tets); // e.g. ANPDJTLED_DET_OMP_NH for models/NH.txt
 }
 
 bool exportVTK(const Model& model, const ModelStates& modelstates, VtkExport& vtk) // final state: deformed and undeformed shapes, both with the final displacements
 {
     cout << "\texporting final results..." << endl;
-    const bool saved = vtk.writeFile("ANPDJTLED_DET_OMP_brain_everyu.vtk", modelstates.m_curr_U.data(), true,  "displacement") &&
-                       vtk.writeFile("ANPDJTLED_DET_OMP_undeformed.vtk",   modelstates.m_curr_U.data(), false, "displacement");
+    // <algorithm>_<model>_u.vtk and <algorithm>_<model>_undeformed.vtk
+    const bool saved = vtk.writeFile(vtk.prefix() + "_u.vtk",          modelstates.m_curr_U.data(), true,  "displacement") &&
+                       vtk.writeFile(vtk.prefix() + "_undeformed.vtk", modelstates.m_curr_U.data(), false, "displacement");
     if (saved) { cout << "\tVTK saved." << endl; }
     return saved;
 }

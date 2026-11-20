@@ -1,4 +1,4 @@
-﻿/*
+/*
 MIT License
 
 Copyright (c) 2022 Jinao Zhang
@@ -29,20 +29,17 @@ SOFTWARE.
 //   3. computeModifiedElementForces:  one thread per tetrahedron, element forces with the ANP-modified Jacobian
 //   4. updateNodes:                   one thread per node, sums its element forces, central-difference update, BCs
 // The nodes sum their element forces through the same node-to-element map as the OpenMP version, so there are no atomic operations.
-// The timer includes writing the timestep VTK files, as in the OpenMP version.
-// Build: nvcc -std=c++17 -O3 src/gpu/nonlocking/ANPDJTLED_CUDA.cu -o bin/ANPDJTLED_CUDA
+// The computation timer covers the time-step loop only; copying U back from the GPU and writing VTK files are timed separately (export time).
+// Build (from the repository root; create bin/ first): nvcc -std=c++17 -O3 src/ANPDJTLED_CUDA.cu -o bin/ANPDJTLED_CUDA
 #include <iostream>
 #include <vector>
-#include <chrono>
-#include <fstream>
 #include <cuda_runtime.h>
 #include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <cstdio>
-#include <cstdint>
 #include <string>
-#include "../../common/vtk_output.h" // VTK export (animation and final shape) and the timers
+#include "vtk_output.h" // VTK export (animation and final shape) and the timers
 using namespace  std;
 static const int BLOCK_SIZE(128); // CUDA threads per block
 
@@ -284,37 +281,38 @@ Model* readModel(int argc, char **argv)
         char buffer[256];
         unsigned int idx(0); float x(0.f), y(0.f), z(0.f);
         fscanf(file, "%u %f %f %f", &idx, &x, &y, &z); model->m_node_begin_index = idx; model->m_nodes.push_back(new Node(idx - model->m_node_begin_index, x, y, z)); // for first node only, to get node begin index
-        while (fscanf(file, "%u %f %f %f", &idx, &x, &y, &z)) { model->m_nodes.push_back(new Node(idx - model->m_node_begin_index, x, y, z)); } // internally, node index starts at 0
+        while (fscanf(file, "%u %f %f %f", &idx, &x, &y, &z) == 4) { model->m_nodes.push_back(new Node(idx - model->m_node_begin_index, x, y, z)); } // internally, node index starts at 0
         fscanf(file, "%255s", buffer); model->m_material_type = buffer;
         if (model->m_material_type == "NH") { float Mu(0.f), K(0.f); fscanf(file, "%f %f", &Mu, &K); model->m_material_vals.push_back(Mu); model->m_material_vals.push_back(K); }
         else if (model->m_material_type == "other_material_types") { /*add your code here*/ }
+        if (model->m_material_vals.size() < 2) { cerr << "\n\tError: unsupported material type: " << model->m_material_type << " (only NH is implemented)." << endl; fclose(file); delete model; return nullptr; }
         fscanf(file, "%255s %f", buffer, &model->m_rho);
         fscanf(file, "%255s", buffer); model->m_ele_type = buffer;
         unsigned int n1_idx(0), n2_idx(0), n3_idx(0), n4_idx(0);
         fscanf(file, "%u %u %u %u %u", &idx, &n1_idx, &n2_idx, &n3_idx, &n4_idx); model->m_ele_begin_index = idx; model->m_tets.push_back(new T4(idx - model->m_ele_begin_index,
                                                                                                                                                    *model->m_nodes[n1_idx - model->m_node_begin_index], *model->m_nodes[n2_idx - model->m_node_begin_index], *model->m_nodes[n3_idx - model->m_node_begin_index], *model->m_nodes[n4_idx - model->m_node_begin_index],
                                                                                                                                                     model->m_rho, model->m_material_type, model->m_material_vals)); // for first ele only, to get ele begin index
-        while (fscanf(file, "%u %u %u %u %u", &idx, &n1_idx, &n2_idx, &n3_idx, &n4_idx)) { model->m_tets.push_back(new T4(idx - model->m_ele_begin_index,
+        while (fscanf(file, "%u %u %u %u %u", &idx, &n1_idx, &n2_idx, &n3_idx, &n4_idx) == 5) { model->m_tets.push_back(new T4(idx - model->m_ele_begin_index,
                                                                                                                             *model->m_nodes[n1_idx - model->m_node_begin_index], *model->m_nodes[n2_idx - model->m_node_begin_index], *model->m_nodes[n3_idx - model->m_node_begin_index], *model->m_nodes[n4_idx - model->m_node_begin_index],
                                                                                                                              model->m_rho, model->m_material_type, model->m_material_vals)); } // internally, ele index starts at 0
-        while (fscanf(file, "%255s", buffer))
+        while (fscanf(file, "%255s", buffer) == 1)
         {
             string BC_type(buffer), xyz("");
             if (BC_type == "<Disp>") // Displacements
             {
                 float u(0.f); fscanf(file, "%255s %f", buffer, &u); xyz = buffer;
-                if      (xyz == "x") { while (fscanf(file, "%u", &idx)) { model->m_disp_idx_x.push_back(idx - model->m_node_begin_index); model->m_disp_mag_x.push_back(u); } }
-                else if (xyz == "y") { while (fscanf(file, "%u", &idx)) { model->m_disp_idx_y.push_back(idx - model->m_node_begin_index); model->m_disp_mag_y.push_back(u); } }
-                else if (xyz == "z") { while (fscanf(file, "%u", &idx)) { model->m_disp_idx_z.push_back(idx - model->m_node_begin_index); model->m_disp_mag_z.push_back(u); } }
+                if      (xyz == "x") { while (fscanf(file, "%u", &idx) == 1) { model->m_disp_idx_x.push_back(idx - model->m_node_begin_index); model->m_disp_mag_x.push_back(u); } }
+                else if (xyz == "y") { while (fscanf(file, "%u", &idx) == 1) { model->m_disp_idx_y.push_back(idx - model->m_node_begin_index); model->m_disp_mag_y.push_back(u); } }
+                else if (xyz == "z") { while (fscanf(file, "%u", &idx) == 1) { model->m_disp_idx_z.push_back(idx - model->m_node_begin_index); model->m_disp_mag_z.push_back(u); } }
                 model->m_num_BCs++;
             }
             else if (BC_type == "<FixP>") // Fixed positions
             {
                 fscanf(file, "%255s", buffer); xyz = buffer;
-                if      (xyz == "x")   { while (fscanf(file, "%u", &idx)) { model->m_fixP_idx_x.push_back(idx - model->m_node_begin_index); } }
-                else if (xyz == "y")   { while (fscanf(file, "%u", &idx)) { model->m_fixP_idx_y.push_back(idx - model->m_node_begin_index); } }
-                else if (xyz == "z")   { while (fscanf(file, "%u", &idx)) { model->m_fixP_idx_z.push_back(idx - model->m_node_begin_index); } }
-                else if (xyz == "all") { while (fscanf(file, "%u", &idx)) { model->m_fixP_idx_x.push_back(idx - model->m_node_begin_index); model->m_fixP_idx_y.push_back(idx - model->m_node_begin_index); model->m_fixP_idx_z.push_back(idx - model->m_node_begin_index); } }
+                if      (xyz == "x")   { while (fscanf(file, "%u", &idx) == 1) { model->m_fixP_idx_x.push_back(idx - model->m_node_begin_index); } }
+                else if (xyz == "y")   { while (fscanf(file, "%u", &idx) == 1) { model->m_fixP_idx_y.push_back(idx - model->m_node_begin_index); } }
+                else if (xyz == "z")   { while (fscanf(file, "%u", &idx) == 1) { model->m_fixP_idx_z.push_back(idx - model->m_node_begin_index); } }
+                else if (xyz == "all") { while (fscanf(file, "%u", &idx) == 1) { model->m_fixP_idx_x.push_back(idx - model->m_node_begin_index); model->m_fixP_idx_y.push_back(idx - model->m_node_begin_index); model->m_fixP_idx_z.push_back(idx - model->m_node_begin_index); } }
                 model->m_num_BCs++;
             }
             else if (BC_type == "<Gravity>") // Gravity
@@ -332,6 +330,7 @@ Model* readModel(int argc, char **argv)
         fscanf(file, "%255s %f", buffer, &model->m_dt);
         fscanf(file, "%255s %f", buffer, &model->m_total_t);
         fclose(file);
+        if (!(model->m_dt > 0.f) || !(model->m_total_t > 0.f)) { cerr << "\n\tError: TimeStep and TotalTime must be positive (is the model file incomplete?): " << argv[1] << endl; delete model; return nullptr; }
         model->m_num_steps = (size_t)ceil(model->m_total_t / model->m_dt);
         model->m_num_DOFs = model->m_nodes.size() * 3;
         model->postCreate();
@@ -343,7 +342,7 @@ void printInfo(const Model& model)
 {
     cout << endl;
     cout << "\t---------------------------------------------------------------------------------------------------" << endl;
-    cout << "\t| Oepn-source (CUDA) implmentation of:                                                            |" << endl;
+    cout << "\t| Open-source (CUDA) implementation of:                                                           |" << endl;
     cout << "\t|               <A direct Jacobian total Lagrangian explicit dynamics finite element algorithm... |" << endl;
     cout << "\t|                                             for real-time simulation of hyperelastic materials. |" << endl;
     cout << "\t|                                                                              Zhang, J. (2021).  |" << endl;
@@ -493,7 +492,7 @@ __global__ void updateNodes(const int num_nodes, const unsigned int* __restrict_
         else                                                // explicit central-difference integration
         {
             const float u = cd_const1[n_DOF] * (external_F[n_DOF] - nodal_internal_F[j]) + cd_const2[n_DOF] * curr_U[n_DOF] + cd_const3[n_DOF] * prev_U[n_DOF];
-            if (isnan(u)) { *diverged = 1; } // checked on the CPU at every export step
+            if (isnan(u)) { *diverged = 1; } // checked on the CPU every 1% of the steps and at every animation frame
             next_U[n_DOF] = u;
         }
     }
@@ -661,14 +660,15 @@ VtkExport makeVtkExport(const Model& model) // undeformed node coordinates and e
     for (const Node* node : model.m_nodes) { xyz[node->m_idx * 3 + 0] = node->m_x; xyz[node->m_idx * 3 + 1] = node->m_y; xyz[node->m_idx * 3 + 2] = node->m_z; }
     vector<unsigned int> tets(model.m_tets.size() * 4);
     for (const T4* tet : model.m_tets) { for (unsigned int m = 0; m < 4; m++) { tets[tet->m_idx * 4 + m] = tet->m_n_idx[m]; } }
-    return VtkExport("ANPDJTLED_CUDA", xyz, tets);
+    return VtkExport(outputPrefix("ANPDJTLED_CUDA", model.m_fname), xyz, tets); // e.g. ANPDJTLED_CUDA_NH for models/NH.txt
 }
 
 bool exportVTK(const Model& model, const ModelStates& modelstates, VtkExport& vtk) // final state: deformed and undeformed shapes, both with the final displacements
 {
     cout << "\texporting final results..." << endl;
-    const bool saved = vtk.writeFile("ANPDJTLED_CUDA_brain_everyu.vtk", modelstates.m_curr_U.data(), true,  "displacement") &&
-                       vtk.writeFile("ANPDJTLED_CUDA_undeformed.vtk",   modelstates.m_curr_U.data(), false, "displacement");
+    // <algorithm>_<model>_u.vtk and <algorithm>_<model>_undeformed.vtk
+    const bool saved = vtk.writeFile(vtk.prefix() + "_u.vtk",          modelstates.m_curr_U.data(), true,  "displacement") &&
+                       vtk.writeFile(vtk.prefix() + "_undeformed.vtk", modelstates.m_curr_U.data(), false, "displacement");
     if (saved) { cout << "\tVTK saved." << endl; }
     return saved;
 }

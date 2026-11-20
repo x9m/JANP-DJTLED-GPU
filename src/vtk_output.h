@@ -1,12 +1,13 @@
-// vtk_output.h: VTK export and timing shared by every solver in src/cpu/ and src/gpu/ (header only; each program includes it).
+// vtk_output.h: VTK export and timing shared by the solvers in src/ (header only; each program includes it).
 //
 //   Stopwatch    wall-clock timer that can be paused, so the simulation time can leave out the VTK export.
 //   parseFrames  reads the optional second command-line argument: the number of animation frames (default 100).
 //   FrameSchedule decides after which time steps a frame is written: the initial state, every `interval` steps, and the last step.
+//   outputPrefix builds the "<algorithm>_<model>" prefix that every output file name starts with (e.g. ANPDJTLED_DET_OMP_NH).
 //   VtkExport    writes legacy ASCII VTK files:
 //                  - an animation: <prefix>_timesteps/<prefix>_step_NNNNNN.vtk (NNNNNN = time steps completed) and the
 //                    ParaView index <prefix>_simulation.vtk.series, which opens as one animated dataset;
-//                  - any other file, such as the final and undeformed shapes.
+//                  - any other file, such as the final shape <prefix>_u.vtk and the undeformed shape <prefix>_undeformed.vtk.
 //                Each file is built in memory and written with one call, and the cell block (the same in every file) is
 //                formatted once. Numbers are formatted as std::ostream does by default (%g, 6 significant digits), so the
 //                text is the same as the previous `fout << value << endl` code. All time spent here is added to ms().
@@ -52,6 +53,14 @@ inline bool parseFrames(int argc, char** argv, size_t& frames)
     }
     frames = (size_t)value;
     return true;
+}
+
+// Prefix of every output file: "<algorithm>_<model>", where <model> is the model file name without its folder and
+// extension (models/NH.txt -> NH). The final files are <prefix>_u.vtk and <prefix>_undeformed.vtk.
+inline std::string outputPrefix(const std::string& algorithm, const std::string& model_path)
+{
+    const std::string model = std::filesystem::path(model_path).stem().string();
+    return algorithm + "_" + (model.empty() ? "model" : model);
 }
 
 // A frame is written for the initial state (0 steps done), after every `interval` steps, and after the last step.
