@@ -1,0 +1,14 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+
+# Reference material kept locally, not tracked
+references/
+reference results/
+
+# Claude Code per-user / session state (shared project settings in .claude/settings.json stay tracked)
+.claude/settings.local.json
+.claude/.cc-writes/
