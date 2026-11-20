@@ -14,6 +14,8 @@ DJTLED is described in:
 
 > Zhang, J. (2021). A direct Jacobian total Lagrangian explicit dynamics finite element algorithm for real-time simulation of hyperelastic materials. *International Journal for Numerical Methods in Engineering*, 122(20), 5744–5772. [doi:10.1002/nme.6772](https://doi.org/10.1002/nme.6772)
 
+The original DJTLED code is on GitHub: [jinaojakezhang/DJTLED](https://github.com/jinaojakezhang/DJTLED).
+
 ## What is in the repository
 
 | Path | What it is |
