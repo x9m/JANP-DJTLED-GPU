@@ -7,9 +7,6 @@ The solvers implement DJTLED, the direct Jacobian total Lagrangian explicit dyna
 | Cube model | Brain model |
 |:---:|:---:|
 | ![Cube model being stretched, coloured by displacement magnitude](docs/cube_049.gif) | ![Brain model deforming under brain shift, coloured by displacement magnitude](docs/brain_049.gif) |
-|                                                                                      |                                                                                                    |
-
-
 
 DJTLED is described in:
 
