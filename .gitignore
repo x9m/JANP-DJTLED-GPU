@@ -16,6 +16,10 @@ applications/
 # Local helper that makes the GIFs in docs/, not tracked
 animate.py
 
+# Generated animations
+docs/
+
 # Claude Code per-user / session state (shared project settings in .claude/settings.json stay tracked)
 .claude/settings.local.json
 .claude/.cc-writes/
+.claude/
