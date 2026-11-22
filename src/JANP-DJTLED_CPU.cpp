@@ -341,15 +341,6 @@ Model* readModel(int argc, char **argv)
 void printInfo(const Model& model)
 {
     cout << endl;
-    cout << "\t---------------------------------------------------------------------------------------------------" << endl;
-    cout << "\t| Open-source (OpenMP) implementation of:                                                         |" << endl;
-    cout << "\t|               <A direct Jacobian total Lagrangian explicit dynamics finite element algorithm... |" << endl;
-    cout << "\t|                                             for real-time simulation of hyperelastic materials. |" << endl;
-    cout << "\t|                                                                              Zhang, J. (2021).  |" << endl;
-    cout << "\t|                International Journal for Numerical Methods in Engineering, 122(20), 5744-5772.  |" << endl;
-    cout << "\t|                                                                           doi:10.1002/nme.6772> |" << endl;
-    cout << "\t|                                                                                  by Jinao Zhang |" << endl;
-    cout << "\t---------------------------------------------------------------------------------------------------" << endl;
     cout << "\tModel:\t\t"      << model.m_fname.c_str()         << endl;
     cout << "\tNodes:\t\t"      << model.m_nodes.size()          << " (" << model.m_num_DOFs    << " DOFs)" << endl;
     cout << "\tElements:\t"     << model.m_tets.size()           << " (" << model.m_ele_type.c_str() << ")" << endl;
